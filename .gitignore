@@ -1,4 +1,6 @@
 tracker
 tracker.nim
+tracker.toml
 build
 tracker-static
+deps/

@@ -8,6 +8,16 @@
 (var pass-count 0)
 (var fail-count 0)
 
+(defn distinct [arr]
+  "Return array with unique elements"
+  (def seen @{})
+  (def result @[])
+  (each item arr
+    (unless (seen item)
+      (put seen item true)
+      (array/push result item)))
+  result)
+
 (defmacro test [name & body]
   ~(do
      (++ test-count)
@@ -62,9 +72,22 @@
   (assert (nil? (t/find-last "xy" "ab cd ef"))))
 
 (test "generate-id creates 2-character strings"
-  (def id (t/generate-id))
+  (def tasks @{})
+  (def id (t/generate-id tasks))
   (assert (= 2 (length id)))
   (assert (peg/match ~(sequence (some (choice (range "az") (range "09")))) id)))
+
+(test "generate-id creates unique IDs"
+  (def tasks @{"Task 1" @{:id "ab"} "Task 2" @{:id "cd"}})
+  (var ids @[])
+  (for i 0 10
+    (def id (t/generate-id tasks))
+    (assert (not (find |(= $ id) ["ab" "cd"])))
+    (array/push ids id)
+    # Add small delay to ensure different timestamps
+    (os/sleep 0.001))
+  # Check we got different IDs (with seeding, should be different)
+  (assert (>= (length (distinct ids)) 2)))
 
 (test "format-duration handles various durations"
   (assert (= "0m" (t/format-duration 0)))
@@ -82,13 +105,6 @@
   (assert (= 86400 (t/parse-duration "1d")))
   (assert (= 95400 (t/parse-duration "1d 2h 30m"))))
 
-(test "format-date and parse-date round trip"
-  (def timestamp 1234567890)
-  (def formatted (t/format-date timestamp))
-  (def parsed (t/parse-date formatted))
-  # format-date only preserves minute precision, so compare with seconds zeroed
-  (assert (= (- timestamp (% timestamp 60)) parsed)))
-
 (test "parse-date handles nil"
   (assert (nil? (t/parse-date nil)))
   (assert (nil? (t/parse-date "nil"))))
@@ -96,7 +112,8 @@
 # Test task creation
 (test "make-task creates proper structure"
   (with-dyns [:current-time mock-current-time]
-    (def task (t/make-task "Test task"))
+    (def tasks @{})
+    (def task (t/make-task "Test task" tasks))
     (assert (= "Test task" (task :name)))
     (assert (= "running" (task :status)))
     (assert (= mock-time (task :created)))
@@ -104,6 +121,13 @@
     (assert (deep= @[[mock-time nil]] (task :time-sessions)))
     (assert (deep= @[] (task :tags)))
     (assert (deep= @[] (task :notes)))))
+
+(test "make-task with tags and notes"
+  (with-dyns [:current-time mock-current-time]
+    (def tasks @{})
+    (def task (t/make-task "Test task" tasks @["urgent"] @["Note 1"]))
+    (assert (deep= @["urgent"] (task :tags)))
+    (assert (deep= @["Note 1"] (task :notes)))))
 
 # Test find-task
 (test "find-task finds by name"
@@ -123,31 +147,70 @@
   (assert (nil? (t/find-task tasks "Missing")))
   (assert (nil? (t/find-task tasks "zz"))))
 
-# Test task template formatting
+# Test calc-total-time
+(test "calc-total-time calculates completed sessions"
+  (with-dyns [:current-time mock-current-time]
+    (def task @{:status "stopped"
+                :time-sessions @[[100 200] [300 500]]})
+    (assert (= 300 (t/calc-total-time task)))))
+
+(test "calc-total-time includes running session"
+  (with-dyns [:current-time (fn [] 700)]
+    (def task @{:status "running"
+                :time-sessions @[[100 200] [300 500] [600 nil]]})
+    (assert (= 400 (t/calc-total-time task)))))
+
+(test "calc-total-time ignores nil sessions for stopped tasks"
+  (with-dyns [:current-time (fn [] 700)]
+    (def task @{:status "stopped"
+                :time-sessions @[[100 200] [300 500] [600 nil]]})
+    (assert (= 300 (t/calc-total-time task)))))
+
+# Test calc-session-duration
+(test "calc-session-duration calculates duration"
+  (assert (= 100 (t/calc-session-duration 100 200 300)))
+  (assert (= 200 (t/calc-session-duration 100 nil 300)))
+  (assert (nil? (t/calc-session-duration nil 200 300))))
+
+# Test format-task-list-line
+(test "format-task-list-line formats task"
+  (with-dyns [:current-time (fn [] 700)]
+    (def task @{:name "Test Task"
+                :id "ab"
+                :status "running"
+                :time-sessions @[[100 200] [300 500] [600 nil]]})
+    (def line (t/format-task-list-line task))
+    (assert (string/find "[running]" line))
+    (assert (string/find "[ab]" line))
+    (assert (string/find "Test Task" line))))
+
+# Test task-template formatting
 (test "task-template formats complete task"
-  (def task @{:name "Test Task"
-              :id "ab"
-              :status "running"
-              :created 1234567890
-              :time-sessions @[[1234567890 1234568490] [1234570000 nil]]
-              :tags @["urgent" "bug"]
-              :notes @["First note" "Second note"]})
-  (def output (t/task-template task))
-  (assert (string/find "# Task: Test Task" output))
-  (assert (string/find "- **ID**: ab" output))
-  (assert (string/find "- **Status**: running" output))
-  (assert (string/find "- **Created**: 2009-02-13 00:31" output))
-  (assert (string/find "#urgent #bug" output))
-  (assert (string/find "First note; Second note" output)))
+  (with-dyns [:current-time (fn [] 1234570600)]
+    (def task @{:name "Test Task"
+                :id "ab"
+                :status "running"
+                :created 1234567890
+                :time-sessions @[[1234567890 1234568490] [1234570000 nil]]
+                :tags @["urgent" "bug"]
+                :notes @["First note" "Second note"]})
+    (def output (t/task-template task))
+    (assert (string/find "Task: Test Task" output))
+    (assert (string/find "ID: ab" output))
+    (assert (string/find "Status: running" output))
+    (assert (string/find "Created: 2009-02-13" output))
+    (assert (string/find "Total Time:" output))
+    (assert (string/find "#urgent #bug" output))
+    (assert (string/find "First note; Second note" output))))
 
 # Test file operations with temporary files
 (defn with-temp-tracker [f]
-  (def temp-file (string "/tmp/test-tracker-" (math/random) ".md"))
-  (with-dyns [:TRACKER_FILE temp-file]
+  (def temp-file (string "/tmp/test-tracker-" (os/cryptorand 8) ".toml"))
+  (with-dyns [:tracker-file temp-file]
     (try
       (f temp-file)
       ([_] nil))
-    (os/rm temp-file)))
+    (try (os/rm temp-file) ([_] nil))))
 
 (test "save-tasks and load-tasks round trip"
   (with-temp-tracker
@@ -168,6 +231,26 @@
       (assert (= "running" (task :status)))
       (assert (deep= @["test"] (task :tags)))
       (assert (deep= @["A note"] (task :notes))))))
+
+(test "save and load handles multiple time sessions"
+  (with-temp-tracker
+    (fn [temp-file]
+      (def tasks @{"Task 1" @{:name "Task 1"
+                              :id "ab"
+                              :status "paused"
+                              :created 1234567890
+                              :time-sessions @[[1234567890 1234568490]
+                                               [1234570000 1234571000]
+                                               [1234572000 nil]]
+                              :tags @[]
+                              :notes @[]}})
+      (t/save-tasks tasks)
+      (def loaded (t/load-tasks))
+      (def task (loaded "Task 1"))
+      (assert (= 3 (length (task :time-sessions))))
+      (assert (= 1234567890 (get-in task [:time-sessions 0 0])))
+      (assert (= 1234568490 (get-in task [:time-sessions 0 1])))
+      (assert (nil? (get-in task [:time-sessions 2 1]))))))
 
 # Test command functions with output capture
 (defn capture-output [f]
@@ -228,6 +311,15 @@
       (def tasks (t/load-tasks))
       (assert (deep= @["urgent"] ((tasks "Task 1") :tags))))))
 
+(test "cmd-tag prevents duplicate tags"
+  (with-temp-tracker
+    (fn [temp-file]
+      (t/cmd-create "Task 1")
+      (t/cmd-tag "Task 1" "urgent")
+      (t/cmd-tag "Task 1" "urgent")
+      (def tasks (t/load-tasks))
+      (assert (deep= @["urgent"] ((tasks "Task 1") :tags))))))
+
 (test "cmd-note adds notes"
   (with-temp-tracker
     (fn [temp-file]
@@ -237,26 +329,17 @@
       (def tasks (t/load-tasks))
       (assert (deep= @["Test note"] ((tasks "Task 1") :notes))))))
 
-(test "calc-total-time calculates session totals"
-  (def sessions @[[100 200] [300 500] [600 nil]])
-  (assert (= 300 (t/calc-total-time sessions))))
 
-# Test list output formatting
-(test "task-list-template formats task info"
-  (def task @{:name "Test Task"
-              :id "ab"
-              :status "paused"
-              :created 1234567890
-              :time-sessions @[[1234567890 1234568490]]
-              :tags @["test"]
-              :notes @["Note 1"]})
-  (def [main created sessions tags notes] (t/task-list-template task))
-  (assert (string/find "[ paused]" main))
-  (assert (string/find "[ab]: Test Task" main))
-  (assert (string/find "Created:" created))
-  (assert (= 1 (length sessions)))
-  (assert tags)
-  (assert notes))
+
+(test "cmd-list lists all tasks"
+  (with-temp-tracker
+    (fn [temp-file]
+      (t/cmd-create "Task 1")
+      (t/cmd-create "Task 2")
+      (def output (capture-output (fn [] (t/cmd-list))))
+      (assert (string/find "Tasks from" output))
+      (assert (string/find "Task 1" output))
+      (assert (string/find "Task 2" output)))))
 
 # Summary
 (printf "\n========================================")

@@ -16,6 +16,7 @@ RUN git clone --depth 1 https://github.com/janet-lang/jpm /tmp/jpm && \
 
 WORKDIR /app
 COPY *.janet .
+COPY deps ./deps
 RUN mkdir -p /output && \
     JANET_PATH=/usr/local/lib/janet \
     CFLAGS="-static -Os -fomit-frame-pointer" \
