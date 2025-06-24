@@ -112,10 +112,10 @@ tracker stop "Implement user authentication"
 
 ```bash
 # Use custom tracker file
-TRACKER_FILE=/path/to/my-project.md tracker list
+TRACKER_FILE=/path/to/my-project.toml tracker list
 
 # Use project-specific tracker
-export TRACKER_FILE=$(pwd)/project-tracker.md
+export TRACKER_FILE=$(pwd)/project-tracker.toml
 tracker create "New feature"
 ```
 
@@ -123,16 +123,17 @@ tracker create "New feature"
 
 Tasks are stored in markdown format with structured metadata:
 
-```markdown
-# Time Tracker
-
-# Task: Implement user authentication
-- **ID**: abc1
-- **Status**: running
-- **Created**: 2023-12-01 09:30
-- **Task Time**: 2023-12-01 09:30-2023-12-01 12:30; 2023-12-01 14:00-nil
-- **Tags**: #backend #security
-- **Notes**: Using JWT tokens; Added password hashing
+```toml
+[tasks.c1]
+name = "Implement user authentication"
+status = "running"
+created = "2023-12-01 09:30"
+task_time = [
+    "2023-12-01 09:30 to 2023-12-01 12:30",
+    "2023-12-01 14:00 to nil"
+]
+tags = ["backend", "security"]
+notes = ["Using JWT tokens", "Added password hashing"]
 ```
 
 ## Building with Just
@@ -172,7 +173,7 @@ jpm test
 
 ```bash
 $ tracker list
-Tasks from /home/marek/.tracker.md:
+Tasks from /home/marek/.tracker.toml:
  [stopped] [         2h 10m] [ab]: Task 1
     Created:    2025-02-13 00:31
     Session  1: 2025-02-13 00:31 - 2025-02-13 02:41 [         2h 10m]
