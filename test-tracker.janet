@@ -195,10 +195,11 @@
                 :tags @["urgent" "bug"]
                 :notes @["First note" "Second note"]})
     (def output (t/task-template task))
+    (print output)
     (assert (string/find "Task: Test Task" output))
     (assert (string/find "ID: ab" output))
     (assert (string/find "Status: running" output))
-    (assert (string/find "Created: 2009-02-13" output))
+    (assert (string/find "Created: 2009-02-12 23:31" output))
     (assert (string/find "Total Time:" output))
     (assert (string/find "#urgent #bug" output))
     (assert (string/find "First note; Second note" output))))

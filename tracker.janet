@@ -67,7 +67,7 @@
 
 (defn format-date [timestamp]
   "Format timestamp to YYYY-MM-DD HH:MM"
-  (let [time (os/date timestamp true)]
+  (let [time (os/date timestamp)]
     (string/format "%04d-%02d-%02d %02d:%02d"
                    (time :year) (+ 1 (time :month)) (time :month-day)
                    (time :hours) (time :minutes))))
